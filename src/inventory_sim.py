@@ -1,33 +1,48 @@
 import random
 
-def run_inventory_simulation(days):
-    # 1. Set the starting inventory for your main warehouse
-    # Let's say Cold Storage 1 starts with 500 pallets of agricultural goods
-    inventory = {'Cold_Storage_1': 500} 
+def run_agentic_inventory_simulation(days):
+    # Initial state
+    inventory = {'Cold_Storage_1': 500}
+    reorder_point = 350
+    order_quantity = 200
+    lead_time = 2  # Days it takes for a truck to arrive from Processing Plant A
     
-    print(f"Starting {days}-Day Inventory Simulation...\n")
-    print(f"Initial Stock: {inventory['Cold_Storage_1']} pallets in Cold_Storage_1\n")
-    print("-" * 40)
+    # Track orders on the road: {arrival_day: quantity}
+    in_transit_orders = {}
     
-    # 2. The "Clock" - simulating day by day
+    print(f"Starting {days}-Day Agentic Replenishment Simulation...\n")
+    print("-" * 50)
+    
     for day in range(1, days + 1):
+        print(f"--- DAY {day} ---")
         
-        # Simulate downstream retailers pulling random demand (between 30 and 60 pallets a day)
+        # 1. MORNING: Receive incoming shipments FIRST (if any arrive today)
+        if day in in_transit_orders:
+            arriving_stock = in_transit_orders[day]
+            inventory['Cold_Storage_1'] += arriving_stock
+            print(f"[ARRIVAL] {arriving_stock} pallets arrived from Processing Plant A!")
+            del in_transit_orders[day] # Clear the truck from the tracker
+        
+        # 2. AFTERNOON: Fulfill downstream demand
         daily_demand = random.randint(30, 60)
-        
-        # Subtract today's demand from the warehouse
         inventory['Cold_Storage_1'] -= daily_demand
         
-        # Print the daily status update
-        print(f"Day {day}: Retail hubs ordered {daily_demand} pallets.")
-        print(f"         Remaining Stock: {inventory['Cold_Storage_1']} pallets.")
+        print(f"Demand: {daily_demand} pallets shipped to retail hubs.")
+        print(f"End-of-Day Stock: {inventory['Cold_Storage_1']} pallets.")
         
-        # 3. Supply Chain Logic: Trigger a warning if stock drops below a safety threshold
-        if inventory['Cold_Storage_1'] <= 350:
-            print(f"  --> [ALERT] Safety stock threshold breached! Agentic AI needs to trigger a replenishment order from Processing Plant A.")
+        # 3. EVENING: Agentic Logic (Check if we need to order)
+        if inventory['Cold_Storage_1'] <= reorder_point:
+            # Check if we already have shipments on the way to prevent over-ordering
+            total_in_transit = sum(in_transit_orders.values())
+            
+            if inventory['Cold_Storage_1'] + total_in_transit <= reorder_point:
+                arrival_day = day + lead_time
+                in_transit_orders[arrival_day] = order_quantity
+                print(f"--> [AGENT ACTION] Stock critical. Autonomously ordered {order_quantity} pallets.")
+                print(f"--> [TRANSIT] Shipment dispatched. Will arrive on Day {arrival_day}.")
         
-        print("-" * 40)
+        print("-" * 50)
 
 if __name__ == "__main__":
-    # Run the simulation for 7 days
-    run_inventory_simulation(7)
+    # Let's run it for 10 days so we have time to see the shipment arrive!
+    run_agentic_inventory_simulation(10)
