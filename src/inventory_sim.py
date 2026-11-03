@@ -2,97 +2,127 @@ import random
 import matplotlib.pyplot as plt
 from network_graph import build_supply_chain_graph
 
-def run_multi_route_optimization_simulation(days):
-    # 1. Load the Digital Twin Map
+def run_full_network_simulation(days):
+    # 1. Load the complete Digital Twin Map (all 9 routes)
     G = build_supply_chain_graph()
     
-    target_warehouse = 'Cold_Storage_2'
+    print("=" * 60)
+    print(" ENTERPRISE DIGITAL TWIN: FULL NETWORK SIMULATION (9 ROUTES) ")
+    print("=" * 60)
     
-    print(f"Connected to Digital Twin Map!")
-    print(f"-> Analyzing Inbound Routes for: {target_warehouse}\n")
+    # Print out all nodes and routes loaded from the map
+    print(f"\n[MAP INSPECTION] Total Network Nodes: {G.number_of_nodes()}")
+    print(f"[MAP INSPECTION] Total Transport Routes (Edges): {G.number_of_edges()}")
     
-    # 2. OPTIMIZATION LOGIC: Find all incoming routes to Cold_Storage_2
-    # NetworkX lets us look at all predecessors (nodes that point TO our target warehouse)
-    inbound_suppliers = list(G.predecessors(target_warehouse))
+    for u, v, data in G.edges(data=True):
+        print(f"   * Route: {u} -> {v} | Lead Time: {data['lead_time']} days | Cost: ${data['transit_cost']}")
+    print("-" * 60)
     
-    print(f"-> Found {len(inbound_suppliers)} alternative supplier plants feeding {target_warehouse}:")
+    # 2. Define Inventory Levels for all Cold Storages & Retail Hubs in the network
+    inventories = {
+        'Cold_Storage_1': 500,
+        'Cold_Storage_2': 500,
+        'Cold_Storage_3': 500,
+        'Retail_Hub_1': 200,
+        'Retail_Hub_2': 200,
+        'Retail_Hub_3': 200,
+        'Retail_Hub_4': 200,
+        'Retail_Hub_5': 200
+    }
     
-    best_supplier = None
-    lowest_cost = float('inf') # Start with an infinitely high cost placeholder
+    reorder_threshold = 150 # Reorder point for warehouses
+    order_qty = 200
     
-    # Evaluate each route to find the optimal (cheapest) one
-    for plant in inbound_suppliers:
-        edge_data = G.edges[plant, target_warehouse]
-        l_time = edge_data['lead_time']
-        t_cost = edge_data['transit_cost']
-        
-        print(f"   * Route from {plant}: Lead Time = {l_time} days | Cost = ${t_cost}")
-        
-        # Optimization Rule: Choose the route with the lowest transit cost
-        if t_cost < lowest_cost:
-            lowest_cost = t_cost
-            best_supplier = plant
-            optimal_lead_time = l_time
-
-    print(f"\n[OPTIMIZATION RESULT] AI Agent selected optimal route:")
-    print(f"-> Supplier: {best_supplier} -> {target_warehouse}")
-    print(f"-> Optimized Lead Time: {optimal_lead_time} days")
-    print(f"-> Optimized Cost: ${lowest_cost}\n")
-    
-    # 3. Simulation Setup for Cold Storage 2
-    inventory = {target_warehouse: 500}
-    reorder_point = 350
-    order_quantity = 200
-    
-    in_transit_orders = {}
+    # Trackers for our final system-wide chart
     days_tracker = []
-    stock_tracker = []
+    cs1_tracker = []
+    cs2_tracker = []
+    cs3_tracker = []
     
-    print(f"Starting {days}-Day Multi-Route Optimized Simulation...\n")
-    print("-" * 50)
+    # In-transit tracker across the network
+    in_transit_shipments = [] # Stores dictionaries of shipments
+    
+    print(f"\nStarting {days}-Day Full System Simulation...\n")
     
     for day in range(1, days + 1):
-        print(f"--- DAY {day} ---")
+        print(f"=== DAY {day} ===")
         
-        # Morning: Receive incoming shipments from the optimal plant
-        if day in in_transit_orders:
-            arriving_stock = in_transit_orders[day]
-            inventory[target_warehouse] += arriving_stock
-            print(f"[ARRIVAL] {arriving_stock} pallets arrived from {best_supplier}!")
-            del in_transit_orders[day] 
-        
-        # Afternoon: Downstream retail demand
-        daily_demand = random.randint(35, 65)
-        inventory[target_warehouse] -= daily_demand
-        print(f"Demand: {daily_demand} pallets shipped.")
-        print(f"End-of-Day Stock: {inventory[target_warehouse]} pallets.")
-        
-        # Evening: Agentic Logic using the OPTIMIZED lead time from the winning route
-        if inventory[target_warehouse] <= reorder_point:
-            total_in_transit = sum(in_transit_orders.values())
+        # 1. MORNING: Process incoming shipments across the network
+        arrived_shipments = []
+        for shipment in in_transit_shipments:
+            shipment['remaining_lead_time'] -= 1
+            if shipment['remaining_lead_time'] <= 0:
+                # Shipment arrives at destination warehouse!
+                dest = shipment['destination']
+                qty = shipment['quantity']
+                inventories[dest] += qty
+                print(f"   [ARRIVAL] {qty} pallets arrived at {dest} from {shipment['source']}!")
+                arrived_shipments.append(shipment)
+                
+        # Remove arrived shipments from active transit list
+        for arrived in arrived_shipments:
+            in_transit_shipments.remove(arrived)
             
-            if inventory[target_warehouse] + total_in_transit <= reorder_point:
-                arrival_day = day + optimal_lead_time
-                in_transit_orders[arrival_day] = order_quantity
-                print(f"--> [AGENT ACTION] Stock critical at {target_warehouse}.")
-                print(f"--> [OPTIMIZED DISPATCH] Truck dispatched via {best_supplier}. Arriving in {optimal_lead_time} days (Day {arrival_day}).")
+        # 2. AFTERNOON: Downstream retail demand pulls inventory
+        for node in inventories:
+            if 'Retail' in node:
+                # Retail demand
+                demand = random.randint(10, 25)
+                inventories[node] = max(0, inventories[node] - demand)
+            elif 'Cold_Storage' in node:
+                # Cold storage experiences daily baseline warehouse loss/demand
+                demand = random.randint(25, 45)
+                inventories[node] -= demand
         
+        # 3. EVENING: Agentic Replenishment Logic for Cold Storages
+        for cs_node in ['Cold_Storage_1', 'Cold_Storage_2', 'Cold_Storage_3']:
+            if inventories[cs_node] <= reorder_threshold:
+                # Find optimal inbound supplier route from our graph map!
+                inbound_suppliers = list(G.predecessors(cs_node))
+                best_supplier = inbound_suppliers[0] # Default to first
+                lowest_cost = float('inf')
+                
+                # Optimize by cost
+                for sup in inbound_suppliers:
+                    cost = G.edges[sup, cs_node]['transit_cost']
+                    if cost < lowest_cost:
+                        lowest_cost = cost
+                        best_supplier = sup
+                        
+                lead_time = G.edges[best_supplier, cs_node]['lead_time']
+                
+                # Dispatch order
+                in_transit_shipments.append({
+                    'source': best_supplier,
+                    'destination': cs_node,
+                    'quantity': order_qty,
+                    'remaining_lead_time': lead_time
+                })
+                print(f"   --> [AGENT ACTION] Low stock at {cs_node} ({inventories[cs_node]} left). Ordered {order_qty} from {best_supplier} (Lead Time: {lead_time} days).")
+
+        # Record daily metrics for charting
         days_tracker.append(day)
-        stock_tracker.append(inventory[target_warehouse])
+        cs1_tracker.append(inventories['Cold_Storage_1'])
+        cs2_tracker.append(inventories['Cold_Storage_2'])
+        cs3_tracker.append(inventories['Cold_Storage_3'])
+        
+        print(f"   [End-of-Day Status] CS1: {inventories['Cold_Storage_1']} | CS2: {inventories['Cold_Storage_2']} | CS3: {inventories['Cold_Storage_3']}")
         print("-" * 50)
 
-    # Generate the chart
-    plt.figure(figsize=(10, 5))
-    plt.plot(days_tracker, stock_tracker, marker='o', linestyle='-', color='#2ca02c', label=f'Stock Level ({target_warehouse})', linewidth=2)
-    plt.axhline(y=reorder_point, color='red', linestyle='--', label='Safety Stock Threshold (350)', linewidth=2)
-    plt.title(f"Multi-Route Optimization - {target_warehouse} (Optimized via {best_supplier})", fontsize=14, fontweight='bold')
+    # 4. Generate Multi-Warehouse Enterprise Chart
+    plt.figure(figsize=(10, 6))
+    plt.plot(days_tracker, cs1_tracker, marker='o', label='Cold Storage 1', linewidth=2)
+    plt.plot(days_tracker, cs2_tracker, marker='s', label='Cold Storage 2', linewidth=2)
+    plt.plot(days_tracker, cs3_tracker, marker='^', label='Cold Storage 3', linewidth=2)
+    
+    plt.axhline(y=reorder_threshold, color='red', linestyle='--', label='Safety Threshold (150)', linewidth=2)
+    plt.title("Enterprise Digital Twin - Multi-Warehouse Inventory Simulation (All 9 Routes Active)", fontsize=13, fontweight='bold')
     plt.xlabel("Day", fontsize=12)
-    plt.ylabel(f"Pallets in {target_warehouse}", fontsize=12)
-    plt.ylim(200, 600)
+    plt.ylabel("Pallet Stock Levels", fontsize=12)
     plt.legend()
     plt.grid(True, linestyle=':', alpha=0.7)
     plt.savefig("inventory_chart.png", bbox_inches='tight')
-    print("\nSuccess! Multi-route optimized chart saved as inventory_chart.png")
+    print("\nSuccess! Full enterprise multi-warehouse chart saved as inventory_chart.png")
 
 if __name__ == "__main__":
-    run_multi_route_optimization_simulation(15)
+    run_full_network_simulation(15)
